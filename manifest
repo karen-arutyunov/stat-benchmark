@@ -1,0 +1,12 @@
+: 1
+name: stat-benchmark
+version: 0.1.0-a.0.z
+summary: stat-benchmark C++ executable
+license: other: proprietary ; Not free/open source.
+description-file: README.md
+url: https://example.org/stat-benchmark
+email: karen@codesynthesis.com
+#build-error-email: karen@codesynthesis.com
+depends: * build2 >= 0.15.0
+depends: * bpkg >= 0.15.0
+#depends: libhello ^1.0.0

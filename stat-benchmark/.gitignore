@@ -1,0 +1,5 @@
+stat-benchmark
+
+# Testscript output directory (can be symlink).
+#
+test-stat-benchmark
