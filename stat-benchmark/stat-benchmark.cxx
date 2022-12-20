@@ -35,9 +35,34 @@
 struct failed {};
 
 using namespace std;
-using namespace std::chrono;
 
-string
+using std::chrono::system_clock;
+using std::chrono::nanoseconds;
+using std::chrono::duration_cast;
+
+using timestamp = system_clock::time_point;
+using duration = system_clock::duration;
+
+const timestamp::rep timestamp_unknown_rep     = -1;
+const timestamp      timestamp_unknown         = timestamp (duration (-1));
+const timestamp::rep timestamp_nonexistent_rep = 0;
+const timestamp      timestamp_nonexistent     = timestamp (duration (0));
+const timestamp::rep timestamp_unreal_rep      = 1;
+const timestamp      timestamp_unreal          = timestamp (duration (1));
+
+struct entry_time
+{
+  timestamp modification;
+  timestamp access;
+};
+
+static inline bool
+operator== (const entry_time& x, const entry_time& y)
+{
+  return x.modification == y.modification && x.access == y.access;
+}
+
+static string
 error_msg (DWORD code)
 {
   struct msg_deleter {void operator() (char* p) const {LocalFree (p);}};
@@ -60,7 +85,7 @@ error_msg (DWORD code)
   return msg;
 }
 
-static string
+static inline string
 last_error_msg ()
 {
   return error_msg (GetLastError ());
@@ -136,34 +161,34 @@ inline auto_handle::
   reset ();
 }
 
-inline bool
+static inline bool
 operator== (const auto_handle& x, const auto_handle& y)
 {
   return x.get () == y.get ();
 }
 
-inline bool
+static inline bool
 operator!= (const auto_handle& x, const auto_handle& y)
 {
   return !(x == y);
 }
 
-inline bool
+static inline bool
 operator== (const auto_handle& x, nullhandle_t)
 {
   return x.get () == INVALID_HANDLE_VALUE;
 }
 
-inline bool
+static inline bool
 operator!= (const auto_handle& x, nullhandle_t y)
 {
   return !(x == y);
 }
 
-ostream&
-to_stream (ostream& os, const system_clock::duration& d, bool ns)
+static ostream&
+to_stream (ostream& os, const duration& d, bool ns)
 {
-  system_clock::time_point ts; // Epoch.
+  timestamp ts; // Epoch.
   ts += d;
 
   time_t t (system_clock::to_time_t (ts));
@@ -232,11 +257,9 @@ to_stream (ostream& os, const system_clock::duration& d, bool ns)
       return os;
   }
 
-  using namespace chrono;
-
   if (ns)
   {
-    system_clock::time_point sec (system_clock::from_time_t (t));
+    timestamp sec (system_clock::from_time_t (t));
     nanoseconds nsec (duration_cast<nanoseconds> (ts - sec));
 
     if (nsec != nanoseconds::zero ())
@@ -262,29 +285,228 @@ to_stream (ostream& os, const system_clock::duration& d, bool ns)
   return os;
 }
 
-inline ostream&
-operator<< (ostream& os, const system_clock::duration& d)
+static inline ostream&
+operator<< (ostream& os, const duration& d)
 {
   return to_stream (os, d, true);
 }
 
-int main (int argc, char* argv[])
+namespace details
+{
+  static tm*
+  gmtime (const time_t* t, tm* r)
+  {
+#ifdef _WIN32
+    const tm* gt (::gmtime (t));
+    if (gt == nullptr)
+      return nullptr;
+
+    *r = *gt;
+    return r;
+#else
+    return gmtime_r (t, r);
+#endif
+  }
+
+  static tm*
+  localtime (const time_t* t, tm* r)
+  {
+#ifdef _WIN32
+    const tm* lt (::localtime (t));
+    if (lt == nullptr)
+      return nullptr;
+
+    *r = *lt;
+    return r;
+#else
+    return localtime_r (t, r);
+#endif
+  }
+}
+
+
+ostream&
+to_stream (ostream& os,
+           const timestamp& ts,
+           const char* format,
+           bool special,
+           bool local)
+{
+  if (special)
+  {
+    if (ts == timestamp_unknown)
+      return os << "<unknown>";
+
+    if (ts == timestamp_nonexistent)
+      return os << "<nonexistent>";
+
+    if (ts == timestamp_unreal)
+      return os << "<unreal>";
+  }
+
+  time_t t (system_clock::to_time_t (ts));
+
+  std::tm tm;
+  if ((local
+       ? details::localtime (&t, &tm)
+       : details::gmtime (&t, &tm)) == nullptr)
+  {
+    system_error e (errno, generic_category ());
+    cerr << "error: localtime() or gmtime() failed: " << e.what () << endl;
+    throw failed ();
+  }
+
+  timestamp sec (system_clock::from_time_t (t));
+  nanoseconds ns (duration_cast<nanoseconds> (ts - sec));
+
+  char fmt[256];
+  size_t n (strlen (format));
+  if (n + 1 > sizeof (fmt))
+  {
+    system_error e (EINVAL, generic_category ());
+    cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+    throw failed ();
+  }
+
+  memcpy (fmt, format, n + 1);
+
+  // Chunk the format string into fragments that we feed to put_time() and
+  // those that we handle ourselves. Watch out for the escapes (%%).
+  //
+  size_t i (0), j (0); // put_time()'s range.
+
+  // Print the time partially, using the not printed part of the format
+  // string up to the current scanning position and setting the current
+  // character to NULL. Return true if the operation succeeded.
+  //
+  auto print = [&i, &j, &fmt, &os, &tm] ()
+    {
+      if (i != j)
+      {
+        fmt[j] = '\0'; // Note: there is no harm if j == n.
+        if (!(os << put_time (&tm, fmt + i)))
+          return false;
+      }
+
+      return true;
+    };
+
+  for (; j != n; ++j)
+  {
+    if (fmt[j] == '%' && j + 1 != n)
+    {
+      char c (fmt[j + 1]);
+
+      if (c == '[')
+      {
+        if (os.width () != 0)
+        {
+          cerr << "padding is not supported when printing nanoseconds" << endl;
+          throw failed ();
+        }
+
+        // Our fragment.
+        //
+        if (!print ())
+          return os;
+
+        j += 2; // Character after '['.
+        if (j == n)
+        {
+          system_error e (EINVAL, generic_category ());
+          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          throw failed ();
+        }
+
+        char d ('\0');
+        if (fmt[j] != 'N')
+        {
+          d = fmt[j];
+          if (++j == n || fmt[j] != 'N')
+          {
+            system_error e (EINVAL, generic_category ());
+            cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+            throw failed ();
+          }
+        }
+
+        if (++j == n || fmt[j] != ']')
+        {
+          system_error e (EINVAL, generic_category ());
+          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          throw failed ();
+        }
+
+        if (ns != nanoseconds::zero ())
+        {
+          if (d != '\0')
+            os << d;
+
+          ostream::fmtflags fl (os.flags ());
+          char fc (os.fill ('0'));
+          os << dec << right << setw (9) << ns.count ();
+          os.fill (fc);
+          os.flags (fl);
+        }
+
+        i = j + 1; // j is incremented in the for-loop header.
+      }
+      //
+      // Note that MinGW (as of GCC 9.2) libstdc++'s implementations of
+      // std::put_time() and std::strftime() don't recognize the %e
+      // specifier, converting it into the empty string (bug #95624). Thus,
+      // we handle this specifier ourselves for libstdc++ on Windows.
+      //
+#if defined(_WIN32) && defined(__GLIBCXX__)
+      else if (c == 'e')
+      {
+        if (!print ())
+          return os;
+
+        ostream::fmtflags fl (os.flags ());
+        char fc (os.fill (' '));
+
+        // Note: the width is automatically reset to 0 (unspecified) after
+        // we print the day.
+        //
+        os << dec << right << setw (2) << tm.tm_mday;
+
+        os.fill (fc);
+        os.flags (fl);
+
+        ++j;       // Positions at 'e'.
+        i = j + 1; // j is incremented in the for-loop header.
+      }
+#endif
+      else
+        ++j; // Skip % and the next character to handle %%.
+    }
+  }
+
+  print (); // Call put_time() one last time, if required.
+  return os;
+}
+
+inline ostream&
+operator<< (std::ostream& os, const timestamp& ts)
+{
+  return to_stream (os, ts, "%Y-%m-%d %H:%M:%S%[.N]", true, true);
+}
+
+int
+main (int argc, char* argv[])
 {
   auto usage = [&argv] ()
   {
     cerr << "Usage:" << endl
          << "  " << argv[0] << " stat (-a|-e|-h) <file>" << endl
-         << "  " << argv[0] << " iter [-a|-e|-h] <dir>" << endl;
+         << "  " << argv[0] << " iter (-p|-n) (-a|-e|-h)? <dir>" << endl;
 
     throw failed ();
   };
 
   try
   {
-    bool attrs (false);
-    bool attrs_ex (false);
-    bool attrs_handle (false);
-
     int i (1);
 
     if (argc == 1)
@@ -305,25 +527,143 @@ int main (int argc, char* argv[])
     else
       usage ();
 
+    enum class stat
+    {
+      none,
+      attrs,
+      attrs_ex,
+      handle
+    } st (stat::none);
+
+    enum class iter
+    {
+      none,
+      native,
+      posix
+    } it (iter::none);
+
     for (++i; i != argc; ++i)
     {
       string v (argv[i]);
 
+      auto sst = [&st, &usage] (stat v)
+      {
+        if (st != stat::none)
+          usage ();
+
+        st = v;
+      };
+
+      auto sit = [&it, &usage] (iter v)
+      {
+        if (it != iter::none)
+          usage ();
+
+        it = v;
+      };
+
       if (v == "-a")
-        attrs = true;
+        sst (stat::attrs);
       else if (v == "-e")
-        attrs_ex = true;
+        sst (stat::attrs_ex);
       else if (v == "-h")
-        attrs_handle = true;
+        sst (stat::handle);
+      else if (v == "-p")
+        sit (iter::posix);
+      else if (v == "-n")
+        sit (iter::native);
       else
         break;
     }
+
+    auto tm = [] (const FILETIME& t) -> timestamp
+    {
+      // Time in FILETIME is in 100 nanosecond "ticks" since "Windows epoch"
+      // (1601-01-01T00:00:00Z). To convert it to "UNIX epoch"
+      // (1970-01-01T00:00:00Z) we need to subtract 11644473600 seconds.
+      //
+      uint64_t nsec ((static_cast<uint64_t> (t.dwHighDateTime) << 32) |
+                     t.dwLowDateTime);
+
+      nsec -= 11644473600ULL * 10000000; // Now in UNIX epoch.
+      nsec *= 100;                       // Now in nanoseconds.
+
+      return timestamp (
+        chrono::duration_cast<duration> (chrono::nanoseconds (nsec)));
+    };
+
+    auto entry_tm = [&st, &tm] (const string& p) -> entry_time
+    {
+      switch (st)
+      {
+      case stat::attrs:
+        {
+          DWORD a (GetFileAttributesA (p.c_str ()));
+          if (a == INVALID_FILE_ATTRIBUTES)
+          {
+            cerr << "error: GetFileAttributesA() failed for " << p << ": "
+                 << last_error_msg () << endl;
+
+            throw failed ();
+          }
+
+          return {timestamp_nonexistent, timestamp_nonexistent};
+        }
+      case stat::attrs_ex:
+        {
+          WIN32_FILE_ATTRIBUTE_DATA a;
+          if (!GetFileAttributesExA (p.c_str (), GetFileExInfoStandard, &a))
+          {
+            cerr << "error: GetFileAttributesExA() failed for " << p
+                 << ": " << last_error_msg () << endl;
+
+            throw failed ();
+          }
+
+          return {tm (a.ftLastWriteTime), tm (a.ftLastAccessTime)};
+        }
+      case stat::handle:
+        {
+          auto_handle h (
+            CreateFile (p.c_str (),
+                        0,
+                        0,
+                        nullptr,
+                        OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS,// Required for a directory.
+                        nullptr));
+
+          if (h == nullhandle)
+          {
+            cerr << "error: CreateFile failed for " << p << ": "
+                 << last_error_msg () << endl;
+
+            throw failed ();
+          }
+
+          BY_HANDLE_FILE_INFORMATION r;
+          if (!GetFileInformationByHandle (h.get (), &r))
+          {
+            cerr << "error: GetFileInformationByHandle() failed for " << p
+                 << ": " << last_error_msg () << endl;
+
+            throw failed ();
+          }
+
+          return {tm (r.ftLastWriteTime), tm (r.ftLastAccessTime)};
+        }
+      case stat::none: break;
+      }
+
+      assert (false); // Can't be here.
+      return {timestamp_nonexistent, timestamp_nonexistent};
+    };
 
     switch (c)
     {
     case cmd::stat:
       {
-        if (i != argc - 1 || (attrs + attrs_ex + attrs_handle) != 1)
+        if (i != argc - 1 || st == stat::none)
           usage ();
 
         string p (argv[i]);
@@ -338,65 +678,12 @@ int main (int argc, char* argv[])
         f.exceptions (ifstream::badbit);
 
         size_t count (0);
-        system_clock::time_point start_time (system_clock::now ());
+        timestamp start_time (system_clock::now ());
 
         for (string p; getline (f, p); ++count)
-        {
-          if (attrs)
-          {
-            DWORD a (GetFileAttributesA (p.c_str ()));
-            if (a == INVALID_FILE_ATTRIBUTES)
-            {
-              cerr << "error: GetFileAttributesA() failed for " << p << ": "
-                   << last_error_msg () << endl;
+          entry_tm (p);
 
-              throw failed ();
-            }
-          }
-          else if (attrs_ex)
-          {
-            WIN32_FILE_ATTRIBUTE_DATA a;
-            if (!GetFileAttributesExA (p.c_str (), GetFileExInfoStandard, &a))
-            {
-              cerr << "error: GetFileAttributesExA() failed for " << p << ": "
-                   << last_error_msg () << endl;
-
-              throw failed ();
-            }
-          }
-          else if (attrs_handle)
-          {
-            auto_handle h (
-              CreateFile (p.c_str (),
-                          0,
-                          0,
-                          nullptr,
-                          OPEN_EXISTING,
-                          FILE_FLAG_BACKUP_SEMANTICS,// Required for a directory.
-                          nullptr));
-
-            if (h == nullhandle)
-            {
-              cerr << "error: CreateFile failed for " << p << ": "
-                   << last_error_msg () << endl;
-
-              throw failed ();
-            }
-
-            BY_HANDLE_FILE_INFORMATION r;
-            if (!GetFileInformationByHandle (h.get (), &r))
-            {
-              cerr << "error: GetFileInformationByHandle() failed for " << p
-                   << ": " << last_error_msg () << endl;
-
-              throw failed ();
-            }
-          }
-          else
-            assert (false);
-        }
-
-        system_clock::time_point end_time (system_clock::now ());
+        timestamp end_time (system_clock::now ());
 
         if (!f.eof ())
         {
@@ -404,8 +691,8 @@ int main (int argc, char* argv[])
           throw failed ();
         }
 
-        system_clock::duration d (end_time - start_time);
-        system_clock::duration de (d / count);
+        duration d (end_time - start_time);
+        duration de (d / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
@@ -413,105 +700,228 @@ int main (int argc, char* argv[])
 
         break;
       }
-
     case cmd::iter:
       {
-        // @@ FindFirstFileA
-
-        if (i != argc - 1 || (attrs + attrs_ex + attrs_handle) > 1)
+        if (i != argc - 1 || it == iter::none)
           usage ();
 
         string p (argv[i]);
 
         size_t count (0);
+        timestamp start_time (system_clock::now ());
 
-        auto iterate = [&count] (const string& d, const auto& iterate) -> void
+        switch (it)
         {
-          struct auto_dir
+        case iter::posix:
           {
-            explicit
-            auto_dir (intptr_t& h): h_ (&h) {}
-
-            auto_dir (const auto_dir&) = delete;
-            auto_dir& operator= (const auto_dir&) = delete;
-
-            ~auto_dir ()
+            auto iterate = [&count] (const string& d,
+                                     const auto& iterate) -> void
             {
-              if (h_ != nullptr && *h_ != -1)
-                _findclose (*h_);
-            }
+              struct auto_dir
+              {
+                explicit
+                auto_dir (intptr_t& h): h_ (&h) {}
 
-            void release () {h_ = nullptr;}
+                auto_dir (const auto_dir&) = delete;
+                auto_dir& operator= (const auto_dir&) = delete;
 
-          private:
-            intptr_t* h_;
-          };
+                ~auto_dir ()
+                {
+                  if (h_ != nullptr && *h_ != -1)
+                    _findclose (*h_);
+                }
 
-          _finddata_t fi;
+                void release () {h_ = nullptr;}
 
-          intptr_t h = -1;
-          auto_dir ad (h);
+              private:
+                intptr_t* h_;
+              };
 
-          for (;;)
-          {
-            bool r;
+              intptr_t h (-1);
+              auto_dir ad (h);
 
-            if (h == -1)
-            {
-              h = _findfirst ((d + "\\*").c_str (), &fi);
-              r = (h != -1);
+              for (;;)
+              {
+                bool r;
+                _finddata_t fi;
+
+                if (h == -1)
+                {
+                  h = _findfirst ((d + "\\*").c_str (), &fi);
+                  r = (h != -1);
 
 //              cerr << "_findfirst: " << d << "\\*" << endl;
-            }
-            else
-            {
-              r = (_findnext (h, &fi) == 0);
+                }
+                else
+                {
+                  r = (_findnext (h, &fi) == 0);
 
 //              cerr << "_findnext" << endl;
-            }
+                }
 
-            if (r)
-            {
-              string p (fi.name);
+                if (r)
+                {
+                  string p (fi.name);
 
 //              cerr << p << endl;
 
-              if (p == "." || p == "..")
-                continue;
+                  if (p == "." || p == "..")
+                    continue;
 
-              ++count;
+                  ++count;
 
-              if ((fi.attrib & _A_SUBDIR) != 0)
-                iterate (d + '\\' + p, iterate);
-            }
-            else if (errno == ENOENT)
-            {
-              // End of stream.
-              //
-              if (h != -1)
-              {
-                _findclose (h);
-                h = -1;
-                break;
+                  if ((fi.attrib & _A_SUBDIR) != 0)
+                    iterate (d + '\\' + p, iterate);
+                }
+                else if (errno == ENOENT)
+                {
+                  // End of stream.
+                  //
+                  if (h != -1)
+                  {
+                    _findclose (h);
+                    h = -1;
+                    break;
+                  }
+                }
+                else
+                {
+                  system_error e (errno, generic_category ());
+                  cerr << "error: _find*() failed: " << e.what () << endl;
+                  throw failed ();
+                }
               }
-            }
-            else
-            {
-              system_error e (errno, generic_category ());
-              cerr << "error: _find*() failed: " << e.what () << endl;
-              throw failed ();
-            }
+            };
+
+            iterate (p, iterate);
+
+            break;
           }
-        };
 
-        system_clock::time_point start_time (system_clock::now ());
+        case iter::native:
+          {
+            auto iterate = [&count, st, &tm, &entry_tm]
+                           (const string& d, const auto& iterate) -> void
+            {
+              struct auto_dir
+              {
+                explicit
+                auto_dir (HANDLE& h): h_ (&h) {}
 
-        iterate (p, iterate);
+                auto_dir (const auto_dir&) = delete;
+                auto_dir& operator= (const auto_dir&) = delete;
 
-        system_clock::time_point end_time (system_clock::now ());
+                ~auto_dir ()
+                {
+                  if (h_ != nullptr && *h_ != INVALID_HANDLE_VALUE)
+                    FindClose (*h_);
+                }
 
-        system_clock::duration d (end_time - start_time);
-        system_clock::duration de (d / count);
+                void release () {h_ = nullptr;}
+
+              private:
+                HANDLE* h_;
+              };
+
+              HANDLE h (INVALID_HANDLE_VALUE);
+              auto_dir ad (h);
+
+              for (;;)
+              {
+                bool r;
+                WIN32_FIND_DATA fi;
+
+                if (h == INVALID_HANDLE_VALUE)
+                {
+                  // @@ Also try FindFirstFileExA. Add tests (serial) and CI.
+                  //    Can actually write test that calculates averages,
+                  //    prints tables, etc... For that can add an aption that
+                  //    prints nanoseconds per entry to stdout.
+                  //
+                  h = FindFirstFileA ((d + "\\*").c_str (), &fi);
+                  r = (h != INVALID_HANDLE_VALUE);
+
+//              cerr << "_findfirst: " << d << "\\*" << endl;
+                }
+                else
+                {
+                  r = FindNextFileA (h, &fi);
+
+//              cerr << "_findnext" << endl;
+                }
+
+                DWORD e (GetLastError ());
+
+                if (r)
+                {
+                  string p (fi.cFileName);
+
+//              cerr << p << endl;
+
+                  if (p == "." || p == "..")
+                    continue;
+
+                  ++count;
+
+                  p = d + '\\' + p;
+
+                  bool dir (
+                    (fi.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+
+                  entry_time t {
+                    tm (fi.ftLastWriteTime), tm (fi.ftLastAccessTime)};
+
+                  if (st != stat::none)
+                  {
+                    entry_time et (entry_tm (p));
+
+                    if (!(t.modification == et.modification &&
+                          t.access <= et.access))
+//                    if (t != et)
+                    {
+                      cerr << "error: times mismatch for " << p
+                           << (dir ? "\\" : "") << endl
+                           << "  find: mod " << t.modification
+                           << " acc " << t.access << endl
+                           << "  stat: mod " << et.modification
+                           << " acc " << et.access << endl;
+                      throw failed ();
+                    }
+                  }
+
+                  if (dir)
+                    iterate (p, iterate);
+                }
+                else if (e == ERROR_FILE_NOT_FOUND || e == ERROR_NO_MORE_FILES)
+                {
+                  // End of stream.
+                  //
+                  if (h != INVALID_HANDLE_VALUE)
+                  {
+                    FindClose (h);
+                    h = INVALID_HANDLE_VALUE;
+                    break;
+                  }
+                }
+                else
+                {
+                  cerr << "error: Find*FileA() failed: " << error_msg (e)
+                       << endl;
+                  throw failed ();
+                }
+              }
+            };
+
+            iterate (p, iterate);
+
+            break;
+          }
+        }
+
+        timestamp end_time (system_clock::now ());
+
+        duration d (end_time - start_time);
+        duration de (d / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
