@@ -168,15 +168,16 @@ operator== (const auto_handle& x, const auto_handle& y)
 }
 
 static inline bool
-operator!= (const auto_handle& x, const auto_handle& y)
-{
-  return !(x == y);
-}
-
-static inline bool
 operator== (const auto_handle& x, nullhandle_t)
 {
   return x.get () == INVALID_HANDLE_VALUE;
+}
+
+#if 0
+static inline bool
+operator!= (const auto_handle& x, const auto_handle& y)
+{
+  return !(x == y);
 }
 
 static inline bool
@@ -184,6 +185,8 @@ operator!= (const auto_handle& x, nullhandle_t y)
 {
   return !(x == y);
 }
+#endif
+
 #else
   // Figuring out whether we have the nanoseconds in struct stat. Some
   // platforms (e.g., FreeBSD), may provide some "compatibility" #define's,
@@ -253,11 +256,11 @@ using std::chrono::duration_cast;
 using timestamp = system_clock::time_point;
 using duration = system_clock::duration;
 
-const timestamp::rep timestamp_unknown_rep     = -1;
+//const timestamp::rep timestamp_unknown_rep     = -1;
 const timestamp      timestamp_unknown         = timestamp (duration (-1));
-const timestamp::rep timestamp_nonexistent_rep = 0;
+//const timestamp::rep timestamp_nonexistent_rep = 0;
 const timestamp      timestamp_nonexistent     = timestamp (duration (0));
-const timestamp::rep timestamp_unreal_rep      = 1;
+//const timestamp::rep timestamp_unreal_rep      = 1;
 const timestamp      timestamp_unreal          = timestamp (duration (1));
 
 #ifdef __GLIBCXX__
@@ -600,12 +603,6 @@ struct entry_time
   timestamp access;
 };
 
-static inline bool
-operator== (const entry_time& x, const entry_time& y)
-{
-  return x.modification == y.modification && x.access == y.access;
-}
-
 int
 main (int argc, char* argv[])
 {
@@ -635,8 +632,9 @@ main (int argc, char* argv[])
     {
       stat,
       iter,
-      avg
-    } c;
+      avg,
+      none
+    } c (cmd::none);
 
     string a (argv[i++]);
 
@@ -835,6 +833,12 @@ main (int argc, char* argv[])
         if (!f.eof ())
         {
           cerr << "error: can't read " << p << endl;
+          throw failed ();
+        }
+
+        if (count == 0)
+        {
+          cerr << "error: no entries in file " << p << endl;
           throw failed ();
         }
 
@@ -1085,6 +1089,12 @@ main (int argc, char* argv[])
 
         timestamp end_time (system_clock::now ());
 
+        if (count == 0)
+        {
+          cerr << "error: no entries in " << p << endl;
+          throw failed ();
+        }
+
         duration d (end_time - start_time);
         duration de (d / count);
 
@@ -1097,7 +1107,8 @@ main (int argc, char* argv[])
 
         break;
       }
-    case cmd::avg: assert (false); break; // Can't be here.
+    case cmd::avg:
+    case cmd::none: assert (false); break; // Can't be here.
     }
 
 #else
@@ -1225,6 +1236,12 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
+        if (count == 0)
+        {
+          cerr << "error: no entries in file " << p << endl;
+          throw failed ();
+        }
+
         duration d (end_time - start_time);
         duration de (d / count);
 
@@ -1237,7 +1254,8 @@ main (int argc, char* argv[])
 
         break;
       }
-    case cmd::avg: assert (false); break; // Can't be here.
+    case cmd::avg:
+    case cmd::none: assert (false); break; // Can't be here.
     }
 
 #endif

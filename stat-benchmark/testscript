@@ -18,12 +18,12 @@ dir = boost_1_81_0
 +$diag "Extract files from archive"
 +$tar_extract $src_base/boost_1_81_0.tar.xz &$dir/***
 
-+$diag "Build files list"
-+$* iter -n -P 1 $dir >=files 2>|
-
 # Benchmarking on Windows.
 #
 +if ($windows)
+  $diag "Build files list"
+  $* iter -n -P 1 $dir >=files 2>|
+
   # Stating.
   #
 
@@ -167,6 +167,36 @@ Time per entry \(nsec\):
   FindFirstFileExA:                        $fffe_time
 
   FindFirstFileExA + GetFileAttributesExA: $fffe_gfae_time
+"
+  $diag "$r"
+else
+  $diag "Build files list"
+  $* iter -o -P 1 $dir >=files 2>|
+
+  # Stating.
+  #
+
+  # stat
+  #
+  $diag ""
+  $diag "Stat using stat"
+  $* stat -s files 2>! # Heat-up.
+
+  i = [uint64] 0
+  n = [uint64] 30
+  s_time = [uint64] 0
+
+  while ($i != $n)
+    $* stat -s -r files 2>| | set t [uint64]
+    s_time += $t
+    i += 1
+  end
+
+  $* avg $s_time $n | set s_time
+
+  r = "
+Time per entry \(nsec\):
+  stat: $s_time
 "
   $diag "$r"
 end
