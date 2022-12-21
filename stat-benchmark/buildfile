@@ -1,7 +1,7 @@
 libs =
 #import libs += libhello%lib{hello}
 
-./: exe{stat-benchmark} file{boost_1_81_0.tar.gz}
+./: exe{stat-benchmark} file{boost_1_81_0.tar.xz}
 
 exe{stat-benchmark}: {hxx ixx txx cxx}{**} $libs testscript
 
