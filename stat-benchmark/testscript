@@ -154,6 +154,7 @@ end
 
 +$* avg $fff_gfae_time $n | set fff_gfae_time
 
+#\
 +$diag ""
 +$diag 'Time per entry (nsec):'
 +$diag "  GetFileAttributesA:                      $gfa_time"
@@ -165,3 +166,18 @@ end
 +$diag "  FindFirstFileExA:                        $fffe_time"
 +$diag ""
 +$diag "  FindFirstFileExA + GetFileAttributesExA: $fff_gfae_time"
+#\
+
+r = "
+Time per entry \(nsec\):
+  GetFileAttributesA:                      $gfa_time
+  GetFileAttributesExA:                    $gfae_time
+  GetFileInformationByHandle:              $gfibh_time
+
+  _findfirst:                              $ff_time
+  FindFirstFileA:                          $fff_time
+  FindFirstFileExA:                        $fffe_time
+
+  FindFirstFileExA + GetFileAttributesExA: $fff_gfae_time
+"
++$diag "$r"
