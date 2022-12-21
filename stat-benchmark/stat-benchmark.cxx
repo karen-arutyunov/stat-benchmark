@@ -162,18 +162,18 @@ inline auto_handle::
 }
 
 static inline bool
-operator== (const auto_handle& x, const auto_handle& y)
-{
-  return x.get () == y.get ();
-}
-
-static inline bool
 operator== (const auto_handle& x, nullhandle_t)
 {
   return x.get () == INVALID_HANDLE_VALUE;
 }
 
 #if 0
+static inline bool
+operator== (const auto_handle& x, const auto_handle& y)
+{
+  return x.get () == y.get ();
+}
+
 static inline bool
 operator!= (const auto_handle& x, const auto_handle& y)
 {
