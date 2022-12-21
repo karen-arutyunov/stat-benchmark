@@ -20,6 +20,9 @@
 #  endif
 #endif
 
+#else
+#  include <sys/types.h> // stat
+#  include <sys/stat.h>  // stat()
 #endif
 
 #ifdef _WIN32
@@ -44,6 +47,19 @@
 struct failed {};
 
 using namespace std;
+
+static string
+errno_msg (int c)
+{
+  system_error e (c, generic_category ());
+  return e.what ();
+}
+
+static inline string
+last_errno_msg ()
+{
+  return errno_msg (errno);
+}
 
 #ifdef _WIN32
 static string
@@ -168,7 +184,65 @@ operator!= (const auto_handle& x, nullhandle_t y)
 {
   return !(x == y);
 }
+#else
+  // Figuring out whether we have the nanoseconds in struct stat. Some
+  // platforms (e.g., FreeBSD), may provide some "compatibility" #define's,
+  // so use the second argument to not end up with the same signatures.
+  //
+  template <typename S>
+  static inline constexpr auto
+  mnsec (const S* s, bool) -> decltype(s->st_mtim.tv_nsec)
+  {
+    return s->st_mtim.tv_nsec; // POSIX (GNU/Linux, Solaris).
+  }
+
+  template <typename S>
+  static inline constexpr auto
+  mnsec (const S* s, int) -> decltype(s->st_mtimespec.tv_nsec)
+  {
+    return s->st_mtimespec.tv_nsec; // *BSD, MacOS.
+  }
+
+  template <typename S>
+  static inline constexpr auto
+  mnsec (const S* s, float) -> decltype(s->st_mtime_n)
+  {
+    return s->st_mtime_n; // AIX 5.2 and later.
+  }
+
+  // Things are not going to end up well with only seconds resolution so
+  // let's make it a compile error.
+  //
+  // template <typename S>
+  // static inline constexpr int
+  // mnsec (...) {return 0;}
+
+  template <typename S>
+  static inline constexpr auto
+  ansec (const S* s, bool) -> decltype(s->st_atim.tv_nsec)
+  {
+    return s->st_atim.tv_nsec; // POSIX (GNU/Linux, Solaris).
+  }
+
+  template <typename S>
+  static inline constexpr auto
+  ansec (const S* s, int) -> decltype(s->st_atimespec.tv_nsec)
+  {
+    return s->st_atimespec.tv_nsec; // *BSD, MacOS.
+  }
+
+  template <typename S>
+  static inline constexpr auto
+  ansec (const S* s, float) -> decltype(s->st_atime_n)
+  {
+    return s->st_atime_n; // AIX 5.2 and later.
+  }
+
+  // template <typename S>
+  // static inline constexpr int
+  // ansec (...) {return 0;}
 #endif
+
 
 // timestamp
 //
@@ -273,8 +347,8 @@ to_stream (ostream& os,
        ? details::localtime (&t, &tm)
        : details::gmtime (&t, &tm)) == nullptr)
   {
-    system_error e (errno, generic_category ());
-    cerr << "error: localtime() or gmtime() failed: " << e.what () << endl;
+    cerr << "error: localtime() or gmtime() failed: " << last_errno_msg ()
+         << endl;
     throw failed ();
   }
 
@@ -285,8 +359,8 @@ to_stream (ostream& os,
   size_t n (strlen (format));
   if (n + 1 > sizeof (fmt))
   {
-    system_error e (EINVAL, generic_category ());
-    cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+    cerr << "error: to_stream(timestamp) failed: " << errno_msg (EINVAL)
+         << endl;
     throw failed ();
   }
 
@@ -335,8 +409,8 @@ to_stream (ostream& os,
         j += 2; // Character after '['.
         if (j == n)
         {
-          system_error e (EINVAL, generic_category ());
-          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          cerr << "error: to_stream(timestamp) failed: " << errno_msg (EINVAL)
+               << endl;
           throw failed ();
         }
 
@@ -346,16 +420,16 @@ to_stream (ostream& os,
           d = fmt[j];
           if (++j == n || fmt[j] != 'N')
           {
-            system_error e (EINVAL, generic_category ());
-            cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+            cerr << "error: to_stream(timestamp) failed: "
+                 << errno_msg (EINVAL) << endl;
             throw failed ();
           }
         }
 
         if (++j == n || fmt[j] != ']')
         {
-          system_error e (EINVAL, generic_category ());
-          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          cerr << "error: to_stream(timestamp) failed: "
+               << errno_msg (EINVAL) << endl;
           throw failed ();
         }
 
@@ -464,8 +538,7 @@ to_stream (ostream& os, const duration& d, bool ns)
 
     if (gt == nullptr)
     {
-      system_error e (errno, generic_category ());
-      cerr << "error: gmtime() failed: " << e.what () << endl;
+      cerr << "error: gmtime() failed: " << last_errno_msg () << endl;
       throw failed ();
     }
 
@@ -542,6 +615,9 @@ main (int argc, char* argv[])
 #ifdef _WIN32
          << "  " << argv[0] << " stat (-a|-e|-h) [-r] <file>" << endl
          << "  " << argv[0] << " iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>" << endl
+#else
+         << "  " << argv[0] << " stat -s [-r] <file>" << endl
+         << "  " << argv[0] << " iter -o [-s] [-P <level>] [-r] <dir>" << endl
 #endif
          << "  " << argv[0] << " avg <sum> <count>" << endl;
 
@@ -559,7 +635,6 @@ main (int argc, char* argv[])
     {
       stat,
       iter,
-      decache,
       avg
     } c;
 
@@ -569,8 +644,6 @@ main (int argc, char* argv[])
       c = cmd::stat;
     else if (a == "iter")
       c = cmd::iter;
-    else if (a == "decache")
-      c = cmd::decache;
     else if (a == "avg")
       c = cmd::avg;
     else
@@ -586,21 +659,21 @@ main (int argc, char* argv[])
     }
 
 #ifdef _WIN32
-    enum class stat
+    enum class cmd_stat
     {
       none,
       attrs,
       attrs_ex,
       handle
-    } st (stat::none);
+    } st (cmd_stat::none);
 
-    enum class iter
+    enum class cmd_iter
     {
       none,
       native,
       native_ex,
       posix
-    } it (iter::none);
+    } it (cmd_iter::none);
 
     unsigned long print (0);
     bool print_result (false);
@@ -609,34 +682,34 @@ main (int argc, char* argv[])
     {
       string v (argv[i]);
 
-      auto sst = [&st, &usage] (stat v)
+      auto sst = [&st, &usage] (cmd_stat v)
       {
-        if (st != stat::none)
+        if (st != cmd_stat::none)
           usage ();
 
         st = v;
       };
 
-      auto sit = [&it, &usage] (iter v)
+      auto sit = [&it, &usage] (cmd_iter v)
       {
-        if (it != iter::none)
+        if (it != cmd_iter::none)
           usage ();
 
         it = v;
       };
 
       if (v == "-a")
-        sst (stat::attrs);
+        sst (cmd_stat::attrs);
       else if (v == "-e")
-        sst (stat::attrs_ex);
+        sst (cmd_stat::attrs_ex);
       else if (v == "-h")
-        sst (stat::handle);
+        sst (cmd_stat::handle);
       else if (v == "-p")
-        sit (iter::posix);
+        sit (cmd_iter::posix);
       else if (v == "-n")
-        sit (iter::native);
+        sit (cmd_iter::native);
       else if (v == "-N")
-        sit (iter::native_ex);
+        sit (cmd_iter::native_ex);
       else if (v == "-P")
       {
         if (++i == argc)
@@ -670,7 +743,7 @@ main (int argc, char* argv[])
     {
       switch (st)
       {
-      case stat::attrs:
+      case cmd_stat::attrs:
         {
           DWORD a (GetFileAttributesA (p.c_str ()));
           if (a == INVALID_FILE_ATTRIBUTES)
@@ -683,7 +756,7 @@ main (int argc, char* argv[])
 
           return {timestamp_nonexistent, timestamp_nonexistent};
         }
-      case stat::attrs_ex:
+      case cmd_stat::attrs_ex:
         {
           WIN32_FILE_ATTRIBUTE_DATA a;
           if (!GetFileAttributesExA (p.c_str (), GetFileExInfoStandard, &a))
@@ -696,7 +769,7 @@ main (int argc, char* argv[])
 
           return {tm (a.ftLastWriteTime), tm (a.ftLastAccessTime)};
         }
-      case stat::handle:
+      case cmd_stat::handle:
         {
           auto_handle h (
             CreateFile (p.c_str (),
@@ -726,7 +799,7 @@ main (int argc, char* argv[])
 
           return {tm (r.ftLastWriteTime), tm (r.ftLastAccessTime)};
         }
-      case stat::none: break;
+      case cmd_stat::none: break;
       }
 
       assert (false); // Can't be here.
@@ -737,7 +810,7 @@ main (int argc, char* argv[])
     {
     case cmd::stat:
       {
-        if (i != argc - 1 || st == stat::none)
+        if (i != argc - 1 || st == cmd_stat::none)
           usage ();
 
         string p (argv[i]);
@@ -779,7 +852,7 @@ main (int argc, char* argv[])
       }
     case cmd::iter:
       {
-        if (i != argc - 1 || it == iter::none)
+        if (i != argc - 1 || it == cmd_iter::none)
           usage ();
 
         string p (argv[i]);
@@ -789,7 +862,7 @@ main (int argc, char* argv[])
 
         switch (it)
         {
-        case iter::posix:
+        case cmd_iter::posix:
           {
             auto iterate = [&count] (const string& d,
                                      const auto& iterate) -> void
@@ -855,8 +928,8 @@ main (int argc, char* argv[])
                 }
                 else
                 {
-                  system_error e (errno, generic_category ());
-                  cerr << "error: _find*() failed: " << e.what () << endl;
+                  cerr << "error: _find*() failed: " << last_errno_msg ()
+                       << endl;
                   throw failed ();
                 }
               }
@@ -867,8 +940,8 @@ main (int argc, char* argv[])
             break;
           }
 
-        case iter::native:
-        case iter::native_ex:
+        case cmd_iter::native:
+        case cmd_iter::native_ex:
           {
             auto iterate = [&count, st, it, &tm, &entry_tm, print]
                            (const string& d, const auto& iterate) -> void
@@ -903,14 +976,9 @@ main (int argc, char* argv[])
 
                 if (h == INVALID_HANDLE_VALUE)
                 {
-                  // @@ Add tests (serial) and CI.
-                  //    Can actually write test that calculates averages,
-                  //    prints tables, etc... For that can add an aption that
-                  //    prints nanoseconds per entry to stdout.
-                  //
                   string p (d + "\\*");
 
-                  if (it == iter::native)
+                  if (it == cmd_iter::native)
                     h = FindFirstFileA (p.c_str (), &fi);
                   else
                     h = FindFirstFileExA (p.c_str (),
@@ -918,7 +986,7 @@ main (int argc, char* argv[])
                                           &fi,
                                           FindExSearchNameMatch,
                                           NULL,
-                                          0); // FIND_FIRST_EX_LARGE_FETCH
+                                          0);
 
                   r = (h != INVALID_HANDLE_VALUE);
                 }
@@ -946,7 +1014,7 @@ main (int argc, char* argv[])
 
                   entry_time et;
 
-                  if (st != stat::none)
+                  if (st != cmd_stat::none)
                   {
                     et = entry_tm (p);
 
@@ -977,7 +1045,7 @@ main (int argc, char* argv[])
                       cout << ' ' << (dir ? "dir" : "reg") << " mod "
                            << t.modification << " acc " << t.access;
 
-                      if (st != stat::none)
+                      if (st != cmd_stat::none)
                         cout << " smod " << et.modification << " sacc "
                              << et.access;
                     }
@@ -1012,6 +1080,7 @@ main (int argc, char* argv[])
 
             break;
           }
+        case cmd_iter::none: break;
         }
 
         timestamp end_time (system_clock::now ());
@@ -1028,9 +1097,107 @@ main (int argc, char* argv[])
 
         break;
       }
-    case cmd::decache:
+    case cmd::avg: assert (false); break; // Can't be here.
+    }
+
+#else
+
+    enum class cmd_stat
+    {
+      none,
+      stat
+    } st (cmd_stat::none);
+
+    enum class cmd_iter
+    {
+      none,
+      opendir
+    } it (cmd_iter::none);
+
+    unsigned long print (0);
+    bool print_result (false);
+
+    for (; i != argc; ++i)
+    {
+      string v (argv[i]);
+
+      auto sst = [&st, &usage] (cmd_stat v)
       {
-        if (i != argc - 1)
+        if (st != cmd_stat::none)
+          usage ();
+
+        st = v;
+      };
+
+      auto sit = [&it, &usage] (cmd_iter v)
+      {
+        if (it != cmd_iter::none)
+          usage ();
+
+        it = v;
+      };
+
+      if (v == "-s")
+        sst (cmd_stat::stat);
+      else if (v == "-o")
+        sit (cmd_iter::opendir);
+      else if (v == "-P")
+      {
+        if (++i == argc)
+          usage ();
+
+        print = stoul (argv[i]);
+      }
+      else if (v == "-r")
+        print_result = true;
+      else
+        break;
+    }
+
+    auto entry_tm = [&st] (const string& p) -> entry_time
+    {
+      switch (st)
+      {
+      case cmd_stat::stat:
+        {
+          struct stat s;
+          if (stat (p.c_str (), &s) != 0)
+          {
+            if (errno == ENOENT || errno == ENOTDIR)
+            {
+              return {timestamp_nonexistent, timestamp_nonexistent};
+            }
+            else
+            {
+              cerr << "error: stat() failed for " << p
+                   << ": " << last_errno_msg () << endl;
+
+              throw failed ();
+            }
+          }
+
+          auto tm = [] (time_t sec, auto nsec) -> timestamp
+          {
+            return system_clock::from_time_t (sec) +
+                   chrono::duration_cast<duration> (
+                     chrono::nanoseconds (nsec));
+          };
+
+          return {tm (s.st_mtime, mnsec<struct stat> (&s, true)),
+                  tm (s.st_atime, ansec<struct stat> (&s, true))};
+        }
+      case cmd_stat::none: break;
+      }
+
+      assert (false); // Can't be here.
+      return {timestamp_nonexistent, timestamp_nonexistent};
+    };
+
+    switch (c)
+    {
+    case cmd::stat:
+      {
+        if (i != argc - 1 || st == cmd_stat::none)
           usage ();
 
         string p (argv[i]);
@@ -1044,26 +1211,13 @@ main (int argc, char* argv[])
 
         f.exceptions (ifstream::badbit);
 
-        for (string p; getline (f, p); )
-        {
-          auto_handle h (
-            CreateFile (p.c_str (),
-                        0,
-                        0,
-                        nullptr,
-                        OPEN_EXISTING,
-                        FILE_FLAG_BACKUP_SEMANTICS | // Required for a directory.
-                        FILE_FLAG_NO_BUFFERING,
-                        nullptr));
+        size_t count (0);
+        timestamp start_time (system_clock::now ());
 
-          if (h == nullhandle)
-          {
-            cerr << "error: CreateFile failed for " << p << ": "
-                 << last_error_msg () << endl;
+        for (string p; getline (f, p); ++count)
+          entry_tm (p);
 
-            throw failed ();
-          }
-        }
+        timestamp end_time (system_clock::now ());
 
         if (!f.eof ())
         {
@@ -1071,10 +1225,21 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
+        duration d (end_time - start_time);
+        duration de (d / count);
+
+        cerr << "entries: " << count << endl
+             << "full time: " << d << endl
+             << "time per entry: " << de << endl;
+
+        if (print_result)
+          cout << duration_cast<nanoseconds> (de).count () << endl;
+
         break;
       }
     case cmd::avg: assert (false); break; // Can't be here.
     }
+
 #endif
 
     return 0;

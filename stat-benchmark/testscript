@@ -23,11 +23,10 @@ dir = boost_1_81_0
 
 # Benchmarking on Windows.
 #
-
-# Stating.
-#
-
 +if ($windows)
+  # Stating.
+  #
+
   # GetFileAttributesA
   #
   $diag ""
