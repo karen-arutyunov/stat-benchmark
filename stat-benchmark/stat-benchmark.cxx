@@ -1,3 +1,5 @@
+#ifdef _WIN32
+
 #ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
 #  ifndef NOMINMAX // No min and max macros.
@@ -18,7 +20,12 @@
 #  endif
 #endif
 
-#include <io.h>   // _findclose()
+#endif
+
+#ifdef _WIN32
+#  include <io.h>   // _findclose()
+#endif
+
 #include <time.h> // gmtime
 
 #include <ctime>        // tm, time_t, strftime()[libstdc++]
@@ -38,6 +45,7 @@ struct failed {};
 
 using namespace std;
 
+#ifdef _WIN32
 static string
 error_msg (DWORD code)
 {
@@ -160,6 +168,7 @@ operator!= (const auto_handle& x, nullhandle_t y)
 {
   return !(x == y);
 }
+#endif
 
 // timestamp
 //
@@ -530,8 +539,10 @@ main (int argc, char* argv[])
   auto usage = [&argv] ()
   {
     cerr << "Usage:" << endl
+#ifdef _WIN32
          << "  " << argv[0] << " stat (-a|-e|-h) [-r] <file>" << endl
          << "  " << argv[0] << " iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>" << endl
+#endif
          << "  " << argv[0] << " avg <sum> <count>" << endl;
 
     throw failed ();
@@ -574,6 +585,7 @@ main (int argc, char* argv[])
       return 0;
     }
 
+#ifdef _WIN32
     enum class stat
     {
       none,
@@ -1063,6 +1075,7 @@ main (int argc, char* argv[])
       }
     case cmd::avg: assert (false); break; // Can't be here.
     }
+#endif
 
     return 0;
   }
