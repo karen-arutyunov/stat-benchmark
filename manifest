@@ -7,6 +7,7 @@ description-file: README.md
 url: https://example.org/stat-benchmark
 email: karen@codesynthesis.com
 #build-error-email: karen@codesynthesis.com
+builds: windows
 depends: * build2 >= 0.15.0
 depends: * bpkg >= 0.15.0
 #depends: libhello ^1.0.0

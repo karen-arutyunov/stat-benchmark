@@ -18,49 +18,25 @@
 #  endif
 #endif
 
-#include<io.h>    // _findclose()
+#include <io.h>   // _findclose()
 #include <time.h> // gmtime
 
-#include <ctime>        // tm, time_t
+#include <ctime>        // tm, time_t, strftime()[libstdc++]
+#include <cerrno>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <cstring>      // memcpy()
 #include <ostream>
 #include <cassert>
 #include <fstream>
-#include <iomanip>
+#include <iomanip>      // put_time()
 #include <iostream>
 #include <system_error>
 
 struct failed {};
 
 using namespace std;
-
-using std::chrono::system_clock;
-using std::chrono::nanoseconds;
-using std::chrono::duration_cast;
-
-using timestamp = system_clock::time_point;
-using duration = system_clock::duration;
-
-const timestamp::rep timestamp_unknown_rep     = -1;
-const timestamp      timestamp_unknown         = timestamp (duration (-1));
-const timestamp::rep timestamp_nonexistent_rep = 0;
-const timestamp      timestamp_nonexistent     = timestamp (duration (0));
-const timestamp::rep timestamp_unreal_rep      = 1;
-const timestamp      timestamp_unreal          = timestamp (duration (1));
-
-struct entry_time
-{
-  timestamp modification;
-  timestamp access;
-};
-
-static inline bool
-operator== (const entry_time& x, const entry_time& y)
-{
-  return x.modification == y.modification && x.access == y.access;
-}
 
 static string
 error_msg (DWORD code)
@@ -185,6 +161,251 @@ operator!= (const auto_handle& x, nullhandle_t y)
   return !(x == y);
 }
 
+// timestamp
+//
+using std::chrono::system_clock;
+using std::chrono::nanoseconds;
+using std::chrono::duration_cast;
+
+using timestamp = system_clock::time_point;
+using duration = system_clock::duration;
+
+const timestamp::rep timestamp_unknown_rep     = -1;
+const timestamp      timestamp_unknown         = timestamp (duration (-1));
+const timestamp::rep timestamp_nonexistent_rep = 0;
+const timestamp      timestamp_nonexistent     = timestamp (duration (0));
+const timestamp::rep timestamp_unreal_rep      = 1;
+const timestamp      timestamp_unreal          = timestamp (duration (1));
+
+#ifdef __GLIBCXX__
+namespace details
+{
+  struct put_time_data
+  {
+    const std::tm* tm;
+    const char* fmt;
+  };
+
+  inline put_time_data
+  put_time (const std::tm* tm, const char* fmt)
+  {
+    return put_time_data {tm, fmt};
+  }
+
+  inline ostream&
+  operator<< (ostream& os, const put_time_data& d)
+  {
+    char buf[256];
+    if (strftime (buf, sizeof (buf), d.fmt, d.tm) != 0)
+      os << buf;
+    else
+      os.setstate (ostream::badbit);
+    return os;
+  }
+}
+#endif
+
+namespace details
+{
+  static tm*
+  gmtime (const time_t* t, tm* r)
+  {
+#ifdef _WIN32
+    const tm* gt (::gmtime (t));
+    if (gt == nullptr)
+      return nullptr;
+
+    *r = *gt;
+    return r;
+#else
+    return gmtime_r (t, r);
+#endif
+  }
+
+  static tm*
+  localtime (const time_t* t, tm* r)
+  {
+#ifdef _WIN32
+    const tm* lt (::localtime (t));
+    if (lt == nullptr)
+      return nullptr;
+
+    *r = *lt;
+    return r;
+#else
+    return localtime_r (t, r);
+#endif
+  }
+}
+
+ostream&
+to_stream (ostream& os,
+           const timestamp& ts,
+           const char* format,
+           bool special,
+           bool local)
+{
+  if (special)
+  {
+    if (ts == timestamp_unknown)
+      return os << "<unknown>";
+
+    if (ts == timestamp_nonexistent)
+      return os << "<nonexistent>";
+
+    if (ts == timestamp_unreal)
+      return os << "<unreal>";
+  }
+
+  time_t t (system_clock::to_time_t (ts));
+
+  std::tm tm;
+  if ((local
+       ? details::localtime (&t, &tm)
+       : details::gmtime (&t, &tm)) == nullptr)
+  {
+    system_error e (errno, generic_category ());
+    cerr << "error: localtime() or gmtime() failed: " << e.what () << endl;
+    throw failed ();
+  }
+
+  timestamp sec (system_clock::from_time_t (t));
+  nanoseconds ns (duration_cast<nanoseconds> (ts - sec));
+
+  char fmt[256];
+  size_t n (strlen (format));
+  if (n + 1 > sizeof (fmt))
+  {
+    system_error e (EINVAL, generic_category ());
+    cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+    throw failed ();
+  }
+
+  memcpy (fmt, format, n + 1);
+
+  // Chunk the format string into fragments that we feed to put_time() and
+  // those that we handle ourselves. Watch out for the escapes (%%).
+  //
+  size_t i (0), j (0); // put_time()'s range.
+
+  // Print the time partially, using the not printed part of the format
+  // string up to the current scanning position and setting the current
+  // character to NULL. Return true if the operation succeeded.
+  //
+  auto print = [&i, &j, &fmt, &os, &tm] ()
+  {
+    if (i != j)
+    {
+      fmt[j] = '\0'; // Note: there is no harm if j == n.
+      if (!(os << put_time (&tm, fmt + i)))
+        return false;
+    }
+
+    return true;
+  };
+
+  for (; j != n; ++j)
+  {
+    if (fmt[j] == '%' && j + 1 != n)
+    {
+      char c (fmt[j + 1]);
+
+      if (c == '[')
+      {
+        if (os.width () != 0)
+        {
+          cerr << "padding is not supported when printing nanoseconds" << endl;
+          throw failed ();
+        }
+
+        // Our fragment.
+        //
+        if (!print ())
+          return os;
+
+        j += 2; // Character after '['.
+        if (j == n)
+        {
+          system_error e (EINVAL, generic_category ());
+          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          throw failed ();
+        }
+
+        char d ('\0');
+        if (fmt[j] != 'N')
+        {
+          d = fmt[j];
+          if (++j == n || fmt[j] != 'N')
+          {
+            system_error e (EINVAL, generic_category ());
+            cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+            throw failed ();
+          }
+        }
+
+        if (++j == n || fmt[j] != ']')
+        {
+          system_error e (EINVAL, generic_category ());
+          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
+          throw failed ();
+        }
+
+        if (ns != nanoseconds::zero ())
+        {
+          if (d != '\0')
+            os << d;
+
+          ostream::fmtflags fl (os.flags ());
+          char fc (os.fill ('0'));
+          os << dec << right << setw (9) << ns.count ();
+          os.fill (fc);
+          os.flags (fl);
+        }
+
+        i = j + 1; // j is incremented in the for-loop header.
+      }
+      //
+      // Note that MinGW (as of GCC 9.2) libstdc++'s implementations of
+      // std::put_time() and std::strftime() don't recognize the %e
+      // specifier, converting it into the empty string (bug #95624). Thus,
+      // we handle this specifier ourselves for libstdc++ on Windows.
+      //
+#if defined(_WIN32) && defined(__GLIBCXX__)
+      else if (c == 'e')
+      {
+        if (!print ())
+          return os;
+
+        ostream::fmtflags fl (os.flags ());
+        char fc (os.fill (' '));
+
+        // Note: the width is automatically reset to 0 (unspecified) after
+        // we print the day.
+        //
+        os << dec << right << setw (2) << tm.tm_mday;
+
+        os.fill (fc);
+        os.flags (fl);
+
+        ++j;       // Positions at 'e'.
+        i = j + 1; // j is incremented in the for-loop header.
+      }
+#endif
+      else
+        ++j; // Skip % and the next character to handle %%.
+    }
+  }
+
+  print (); // Call put_time() one last time, if required.
+  return os;
+}
+
+inline ostream&
+operator<< (std::ostream& os, const timestamp& ts)
+{
+  return to_stream (os, ts, "%Y-%m-%d %H:%M:%S%[.N]", true, true);
+}
+
 static ostream&
 to_stream (ostream& os, const duration& d, bool ns)
 {
@@ -291,206 +512,16 @@ operator<< (ostream& os, const duration& d)
   return to_stream (os, d, true);
 }
 
-namespace details
+struct entry_time
 {
-  static tm*
-  gmtime (const time_t* t, tm* r)
-  {
-#ifdef _WIN32
-    const tm* gt (::gmtime (t));
-    if (gt == nullptr)
-      return nullptr;
+  timestamp modification;
+  timestamp access;
+};
 
-    *r = *gt;
-    return r;
-#else
-    return gmtime_r (t, r);
-#endif
-  }
-
-  static tm*
-  localtime (const time_t* t, tm* r)
-  {
-#ifdef _WIN32
-    const tm* lt (::localtime (t));
-    if (lt == nullptr)
-      return nullptr;
-
-    *r = *lt;
-    return r;
-#else
-    return localtime_r (t, r);
-#endif
-  }
-}
-
-
-ostream&
-to_stream (ostream& os,
-           const timestamp& ts,
-           const char* format,
-           bool special,
-           bool local)
+static inline bool
+operator== (const entry_time& x, const entry_time& y)
 {
-  if (special)
-  {
-    if (ts == timestamp_unknown)
-      return os << "<unknown>";
-
-    if (ts == timestamp_nonexistent)
-      return os << "<nonexistent>";
-
-    if (ts == timestamp_unreal)
-      return os << "<unreal>";
-  }
-
-  time_t t (system_clock::to_time_t (ts));
-
-  std::tm tm;
-  if ((local
-       ? details::localtime (&t, &tm)
-       : details::gmtime (&t, &tm)) == nullptr)
-  {
-    system_error e (errno, generic_category ());
-    cerr << "error: localtime() or gmtime() failed: " << e.what () << endl;
-    throw failed ();
-  }
-
-  timestamp sec (system_clock::from_time_t (t));
-  nanoseconds ns (duration_cast<nanoseconds> (ts - sec));
-
-  char fmt[256];
-  size_t n (strlen (format));
-  if (n + 1 > sizeof (fmt))
-  {
-    system_error e (EINVAL, generic_category ());
-    cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
-    throw failed ();
-  }
-
-  memcpy (fmt, format, n + 1);
-
-  // Chunk the format string into fragments that we feed to put_time() and
-  // those that we handle ourselves. Watch out for the escapes (%%).
-  //
-  size_t i (0), j (0); // put_time()'s range.
-
-  // Print the time partially, using the not printed part of the format
-  // string up to the current scanning position and setting the current
-  // character to NULL. Return true if the operation succeeded.
-  //
-  auto print = [&i, &j, &fmt, &os, &tm] ()
-    {
-      if (i != j)
-      {
-        fmt[j] = '\0'; // Note: there is no harm if j == n.
-        if (!(os << put_time (&tm, fmt + i)))
-          return false;
-      }
-
-      return true;
-    };
-
-  for (; j != n; ++j)
-  {
-    if (fmt[j] == '%' && j + 1 != n)
-    {
-      char c (fmt[j + 1]);
-
-      if (c == '[')
-      {
-        if (os.width () != 0)
-        {
-          cerr << "padding is not supported when printing nanoseconds" << endl;
-          throw failed ();
-        }
-
-        // Our fragment.
-        //
-        if (!print ())
-          return os;
-
-        j += 2; // Character after '['.
-        if (j == n)
-        {
-          system_error e (EINVAL, generic_category ());
-          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
-          throw failed ();
-        }
-
-        char d ('\0');
-        if (fmt[j] != 'N')
-        {
-          d = fmt[j];
-          if (++j == n || fmt[j] != 'N')
-          {
-            system_error e (EINVAL, generic_category ());
-            cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
-            throw failed ();
-          }
-        }
-
-        if (++j == n || fmt[j] != ']')
-        {
-          system_error e (EINVAL, generic_category ());
-          cerr << "error: to_stream(timestamp) failed: " << e.what () << endl;
-          throw failed ();
-        }
-
-        if (ns != nanoseconds::zero ())
-        {
-          if (d != '\0')
-            os << d;
-
-          ostream::fmtflags fl (os.flags ());
-          char fc (os.fill ('0'));
-          os << dec << right << setw (9) << ns.count ();
-          os.fill (fc);
-          os.flags (fl);
-        }
-
-        i = j + 1; // j is incremented in the for-loop header.
-      }
-      //
-      // Note that MinGW (as of GCC 9.2) libstdc++'s implementations of
-      // std::put_time() and std::strftime() don't recognize the %e
-      // specifier, converting it into the empty string (bug #95624). Thus,
-      // we handle this specifier ourselves for libstdc++ on Windows.
-      //
-#if defined(_WIN32) && defined(__GLIBCXX__)
-      else if (c == 'e')
-      {
-        if (!print ())
-          return os;
-
-        ostream::fmtflags fl (os.flags ());
-        char fc (os.fill (' '));
-
-        // Note: the width is automatically reset to 0 (unspecified) after
-        // we print the day.
-        //
-        os << dec << right << setw (2) << tm.tm_mday;
-
-        os.fill (fc);
-        os.flags (fl);
-
-        ++j;       // Positions at 'e'.
-        i = j + 1; // j is incremented in the for-loop header.
-      }
-#endif
-      else
-        ++j; // Skip % and the next character to handle %%.
-    }
-  }
-
-  print (); // Call put_time() one last time, if required.
-  return os;
-}
-
-inline ostream&
-operator<< (std::ostream& os, const timestamp& ts)
-{
-  return to_stream (os, ts, "%Y-%m-%d %H:%M:%S%[.N]", true, true);
+  return x.modification == y.modification && x.access == y.access;
 }
 
 int
@@ -499,8 +530,9 @@ main (int argc, char* argv[])
   auto usage = [&argv] ()
   {
     cerr << "Usage:" << endl
-         << "  " << argv[0] << " stat (-a|-e|-h) <file>" << endl
-         << "  " << argv[0] << " iter (-p|-n) (-a|-e|-h)? <dir>" << endl;
+         << "  " << argv[0] << " stat (-a|-e|-h) [-r] <file>" << endl
+         << "  " << argv[0] << " iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>" << endl
+         << "  " << argv[0] << " avg <sum> <count>" << endl;
 
     throw failed ();
   };
@@ -515,17 +547,32 @@ main (int argc, char* argv[])
     enum class cmd
     {
       stat,
-      iter
+      iter,
+      decache,
+      avg
     } c;
 
-    string a (argv[i]);
+    string a (argv[i++]);
 
     if (a == "stat")
       c = cmd::stat;
     else if (a == "iter")
       c = cmd::iter;
+    else if (a == "decache")
+      c = cmd::decache;
+    else if (a == "avg")
+      c = cmd::avg;
     else
       usage ();
+
+    if (c == cmd::avg)
+    {
+      if (argc != 4)
+        usage ();
+
+      cout << stoul (argv[i]) / stoul (argv[i + 1]) << endl;
+      return 0;
+    }
 
     enum class stat
     {
@@ -539,10 +586,14 @@ main (int argc, char* argv[])
     {
       none,
       native,
+      native_ex,
       posix
     } it (iter::none);
 
-    for (++i; i != argc; ++i)
+    unsigned long print (0);
+    bool print_result (false);
+
+    for (; i != argc; ++i)
     {
       string v (argv[i]);
 
@@ -572,6 +623,17 @@ main (int argc, char* argv[])
         sit (iter::posix);
       else if (v == "-n")
         sit (iter::native);
+      else if (v == "-N")
+        sit (iter::native_ex);
+      else if (v == "-P")
+      {
+        if (++i == argc)
+          usage ();
+
+        print = stoul (argv[i]);
+      }
+      else if (v == "-r")
+        print_result = true;
       else
         break;
     }
@@ -698,6 +760,9 @@ main (int argc, char* argv[])
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
+        if (print_result)
+          cout << duration_cast<nanoseconds> (de).count () << endl;
+
         break;
       }
     case cmd::iter:
@@ -749,21 +814,13 @@ main (int argc, char* argv[])
                 {
                   h = _findfirst ((d + "\\*").c_str (), &fi);
                   r = (h != -1);
-
-//              cerr << "_findfirst: " << d << "\\*" << endl;
                 }
                 else
-                {
                   r = (_findnext (h, &fi) == 0);
-
-//              cerr << "_findnext" << endl;
-                }
 
                 if (r)
                 {
                   string p (fi.name);
-
-//              cerr << p << endl;
 
                   if (p == "." || p == "..")
                     continue;
@@ -799,8 +856,9 @@ main (int argc, char* argv[])
           }
 
         case iter::native:
+        case iter::native_ex:
           {
-            auto iterate = [&count, st, &tm, &entry_tm]
+            auto iterate = [&count, st, it, &tm, &entry_tm, print]
                            (const string& d, const auto& iterate) -> void
             {
               struct auto_dir
@@ -833,30 +891,33 @@ main (int argc, char* argv[])
 
                 if (h == INVALID_HANDLE_VALUE)
                 {
-                  // @@ Also try FindFirstFileExA. Add tests (serial) and CI.
+                  // @@ Add tests (serial) and CI.
                   //    Can actually write test that calculates averages,
                   //    prints tables, etc... For that can add an aption that
                   //    prints nanoseconds per entry to stdout.
                   //
-                  h = FindFirstFileA ((d + "\\*").c_str (), &fi);
-                  r = (h != INVALID_HANDLE_VALUE);
+                  string p (d + "\\*");
 
-//              cerr << "_findfirst: " << d << "\\*" << endl;
+                  if (it == iter::native)
+                    h = FindFirstFileA (p.c_str (), &fi);
+                  else
+                    h = FindFirstFileExA (p.c_str (),
+                                          FindExInfoBasic,
+                                          &fi,
+                                          FindExSearchNameMatch,
+                                          NULL,
+                                          0); // FIND_FIRST_EX_LARGE_FETCH
+
+                  r = (h != INVALID_HANDLE_VALUE);
                 }
                 else
-                {
                   r = FindNextFileA (h, &fi);
-
-//              cerr << "_findnext" << endl;
-                }
 
                 DWORD e (GetLastError ());
 
                 if (r)
                 {
                   string p (fi.cFileName);
-
-//              cerr << p << endl;
 
                   if (p == "." || p == "..")
                     continue;
@@ -871,13 +932,19 @@ main (int argc, char* argv[])
                   entry_time t {
                     tm (fi.ftLastWriteTime), tm (fi.ftLastAccessTime)};
 
+                  entry_time et;
+
                   if (st != stat::none)
                   {
-                    entry_time et (entry_tm (p));
+                    et = entry_tm (p);
 
+                    // Note: as per documentation:
+                    //
+                    // The NTFS file system delays updates to the last access
+                    // time for a file by up to 1 hour after the last access
+                    //
                     if (!(t.modification == et.modification &&
                           t.access <= et.access))
-//                    if (t != et)
                     {
                       cerr << "error: times mismatch for " << p
                            << (dir ? "\\" : "") << endl
@@ -887,6 +954,23 @@ main (int argc, char* argv[])
                            << " acc " << et.access << endl;
                       throw failed ();
                     }
+                  }
+
+                  if (print != 0)
+                  {
+                    cout << p;
+
+                    if (print > 1)
+                    {
+                      cout << ' ' << (dir ? "dir" : "reg") << " mod "
+                           << t.modification << " acc " << t.access;
+
+                      if (st != stat::none)
+                        cout << " smod " << et.modification << " sacc "
+                             << et.access;
+                    }
+
+                    cout << endl;
                   }
 
                   if (dir)
@@ -927,8 +1011,57 @@ main (int argc, char* argv[])
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
+        if (print_result)
+          cout << duration_cast<nanoseconds> (de).count () << endl;
+
         break;
       }
+    case cmd::decache:
+      {
+        if (i != argc - 1)
+          usage ();
+
+        string p (argv[i]);
+
+        ifstream f (p);
+        if (!f.is_open ())
+        {
+          cerr << "error: can't open " << p << endl;
+          throw failed ();
+        }
+
+        f.exceptions (ifstream::badbit);
+
+        for (string p; getline (f, p); )
+        {
+          auto_handle h (
+            CreateFile (p.c_str (),
+                        0,
+                        0,
+                        nullptr,
+                        OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS | // Required for a directory.
+                        FILE_FLAG_NO_BUFFERING,
+                        nullptr));
+
+          if (h == nullhandle)
+          {
+            cerr << "error: CreateFile failed for " << p << ": "
+                 << last_error_msg () << endl;
+
+            throw failed ();
+          }
+        }
+
+        if (!f.eof ())
+        {
+          cerr << "error: can't read " << p << endl;
+          throw failed ();
+        }
+
+        break;
+      }
+    case cmd::avg: assert (false); break; // Can't be here.
     }
 
     return 0;

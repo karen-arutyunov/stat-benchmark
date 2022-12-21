@@ -1,9 +1,167 @@
-: basics
-:
-$* 'World' >'Hello, World!'
+tar_extract = [cmdline] \
+              ($cxx.target.class != 'windows' \
+               ? tar -xf \
+               : tar --force-local -xf)
 
-: missing-name
-:
-$* 2>>EOE != 0
-error: missing name
-EOE
+diag = [cmdline] echo >&2 2>|
+
+# Extract the files from archive.
+#
+# Note: created with `XZ_OPT=-e9 tar cfJ boost_1_81_0.tar.xz boost_1_81_0`
+#
+dir = boost_1_81_0
+
+# Preparation.
+#
++$diag "Extract files from archive"
++$tar_extract $src_base/boost_1_81_0.tar.xz &$dir/***
+
++$diag "Build files list"
++$* iter -n -P 1 $dir >=files 2>|
+
+# Benchmarking.
+#
+
+# Stating.
+#
+
+# GetFileAttributesA
+#
++$diag ""
++$diag "Stat using GetFileAttributesA"
++$* stat -a files 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+gfa_time = [uint64] 0
+
++while ($i != $n)
+  $* stat -a -r files 2>| | set t [uint64]
+  gfa_time += $t
+  i += 1
+end
+
++$* avg $gfa_time $n | set gfa_time
+
+# GetFileAttributesExA
+#
++$diag ""
++$diag "Stat using GetFileAttributesExA"
++$* stat -e files 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+gfae_time = [uint64] 0
+
++while ($i != $n)
+  $* stat -e -r files 2>| | set t [uint64]
+  gfae_time += $t
+  i += 1
+end
+
++$* avg $gfae_time $n | set gfae_time
+
+# GetFileInformationByHandle
+#
++$diag ""
++$diag "Stat using GetFileInformationByHandle"
++$* stat -h files 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+gfibh_time = [uint64] 0
+
++while ($i != $n)
+  $* stat -h -r files 2>| | set t [uint64]
+  gfibh_time += $t
+  i += 1
+end
+
++$* avg $gfibh_time $n | set gfibh_time
+
+# Iterating.
+#
+
+# _findfirst
+#
++$diag ""
++$diag "Iterate using _findfirst"
++$* iter -p $dir 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+ff_time = [uint64] 0
+
++while ($i != $n)
+  $* iter -p -r $dir 2>| | set t [uint64]
+  ff_time += $t
+  i += 1
+end
+
++$* avg $ff_time $n | set ff_time
+
+# FindFirstFileA
+#
++$diag ""
++$diag "Iterate using FindFirstFileA"
++$* iter -n $dir 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+fff_time = [uint64] 0
+
++while ($i != $n)
+  $* iter -n -r $dir 2>| | set t [uint64]
+  fff_time += $t
+  i += 1
+end
+
++$* avg $fff_time $n | set fff_time
+
+# FindFirstFileExA
+#
++$diag ""
++$diag "Iterate using FindFirstFileExA"
++$* iter -N $dir 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+fffe_time = [uint64] 0
+
++while ($i != $n)
+  $* iter -N -r $dir 2>| | set t [uint64]
+  fffe_time += $t
+  i += 1
+end
+
++$* avg $fffe_time $n | set fffe_time
+
+# FindFirstFileA + GetFileAttributesExA
+#
++$diag ""
++$diag "Iterate using FindFirstFileA + GetFileAttributesExA"
++$* iter -n -e $dir 2>- # Heat-up.
+
+i = [uint64] 0
+n = [uint64] 30
+fff_gfae_time = [uint64] 0
+
++while ($i != $n)
+  $* iter -n -e -r $dir 2>| | set t [uint64]
+  fff_gfae_time += $t
+  i += 1
+end
+
++$* avg $fff_gfae_time $n | set fff_gfae_time
+
++$diag ""
++$diag 'Time per entry (nsec):'
++$diag "  GetFileAttributesA:                      $gfa_time"
++$diag "  GetFileAttributesExA:                    $gfae_time"
++$diag "  GetFileInformationByHandle:              $gfibh_time"
++$diag ""
++$diag "  _findfirst:                              $ff_time"
++$diag "  FindFirstFileA:                          $fff_time"
++$diag "  FindFirstFileExA:                        $fffe_time"
++$diag ""
++$diag "  FindFirstFileExA + GetFileAttributesExA: $fff_gfae_time"
