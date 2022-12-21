@@ -29,7 +29,7 @@ dir = boost_1_81_0
 #
 +$diag ""
 +$diag "Stat using GetFileAttributesA"
-+$* stat -a files 2>- # Heat-up.
++$* stat -a files 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -47,7 +47,7 @@ end
 #
 +$diag ""
 +$diag "Stat using GetFileAttributesExA"
-+$* stat -e files 2>- # Heat-up.
++$* stat -e files 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -65,7 +65,7 @@ end
 #
 +$diag ""
 +$diag "Stat using GetFileInformationByHandle"
-+$* stat -h files 2>- # Heat-up.
++$* stat -h files 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -86,7 +86,7 @@ end
 #
 +$diag ""
 +$diag "Iterate using _findfirst"
-+$* iter -p $dir 2>- # Heat-up.
++$* iter -p $dir 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -104,7 +104,7 @@ end
 #
 +$diag ""
 +$diag "Iterate using FindFirstFileA"
-+$* iter -n $dir 2>- # Heat-up.
++$* iter -n $dir 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -122,7 +122,7 @@ end
 #
 +$diag ""
 +$diag "Iterate using FindFirstFileExA"
-+$* iter -N $dir 2>- # Heat-up.
++$* iter -N $dir 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
@@ -140,7 +140,7 @@ end
 #
 +$diag ""
 +$diag "Iterate using FindFirstFileA + GetFileAttributesExA"
-+$* iter -n -e $dir 2>- # Heat-up.
++$* iter -n -e $dir 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
