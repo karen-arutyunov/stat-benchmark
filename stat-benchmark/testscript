@@ -136,37 +136,23 @@ end
 
 +$* avg $fffe_time $n | set fffe_time
 
-# FindFirstFileA + GetFileAttributesExA
+# FindFirstFileExA + GetFileAttributesExA
 #
 +$diag ""
 +$diag "Iterate using FindFirstFileA + GetFileAttributesExA"
-+$* iter -n -e $dir 2>! # Heat-up.
++$* iter -N -e $dir 2>! # Heat-up.
 
 i = [uint64] 0
 n = [uint64] 30
-fff_gfae_time = [uint64] 0
+fffe_gfae_time = [uint64] 0
 
 +while ($i != $n)
-  $* iter -n -e -r $dir 2>| | set t [uint64]
-  fff_gfae_time += $t
+  $* iter -N -e -r $dir 2>| | set t [uint64]
+  fffe_gfae_time += $t
   i += 1
 end
 
-+$* avg $fff_gfae_time $n | set fff_gfae_time
-
-#\
-+$diag ""
-+$diag 'Time per entry (nsec):'
-+$diag "  GetFileAttributesA:                      $gfa_time"
-+$diag "  GetFileAttributesExA:                    $gfae_time"
-+$diag "  GetFileInformationByHandle:              $gfibh_time"
-+$diag ""
-+$diag "  _findfirst:                              $ff_time"
-+$diag "  FindFirstFileA:                          $fff_time"
-+$diag "  FindFirstFileExA:                        $fffe_time"
-+$diag ""
-+$diag "  FindFirstFileExA + GetFileAttributesExA: $fff_gfae_time"
-#\
++$* avg $fffe_gfae_time $n | set fffe_gfae_time
 
 r = "
 Time per entry \(nsec\):
@@ -178,6 +164,6 @@ Time per entry \(nsec\):
   FindFirstFileA:                          $fff_time
   FindFirstFileExA:                        $fffe_time
 
-  FindFirstFileExA + GetFileAttributesExA: $fff_gfae_time
+  FindFirstFileExA + GetFileAttributesExA: $fffe_gfae_time
 "
 +$diag "$r"
