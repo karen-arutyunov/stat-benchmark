@@ -35,9 +35,11 @@
 
 #include <ctime>        // tm, time_t, strftime()[libstdc++]
 #include <cerrno>
+#include <vector>
 #include <chrono>
 #include <memory>
 #include <string>
+#include <utility>
 #include <cstring>      // memcpy()
 #include <ostream>
 #include <cassert>
@@ -888,13 +890,9 @@ main (int argc, char* argv[])
 
         f.exceptions (ifstream::badbit);
 
-        size_t count (0);
-        timestamp start_time (system_clock::now ());
-
-        for (string p; getline (f, p); ++count)
-          entry_tm (p);
-
-        timestamp end_time (system_clock::now ());
+        vector<string> paths;
+        for (string p; getline (f, p); )
+          paths.push_back (move (p));
 
         if (!f.eof ())
         {
@@ -902,20 +900,27 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        if (count == 0)
+        if (paths.empty ())
         {
           cerr << "error: no entries in file " << p << endl;
           throw failed ();
         }
 
+        timestamp start_time (system_clock::now ());
+
+        for (const string& p: paths)
+          entry_tm (p);
+
+        timestamp end_time (system_clock::now ());
+
         nanoseconds d (end_time - start_time);
 
-        cerr << "entries: " << count << endl
+        cerr << "entries: " << paths.size () << endl
              << "full time: " << d << endl
-             << "time per entry: " << d / count << endl;
+             << "time per entry: " << d / paths.size () << endl;
 
         if (print_result)
-          cout << d.count () / count << endl;
+          cout << d.count () / paths.size () << endl;
 
         break;
       }
@@ -1286,13 +1291,9 @@ main (int argc, char* argv[])
 
         f.exceptions (ifstream::badbit);
 
-        size_t count (0);
-        timestamp start_time (system_clock::now ());
-
-        for (string p; getline (f, p); ++count)
-          entry_tm (p);
-
-        timestamp end_time (system_clock::now ());
+        vector<string> paths;
+        for (string p; getline (f, p); )
+          paths.push_back (move (p));
 
         if (!f.eof ())
         {
@@ -1300,20 +1301,27 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        if (count == 0)
+        if (paths.empty ())
         {
           cerr << "error: no entries in file " << p << endl;
           throw failed ();
         }
 
+        timestamp start_time (system_clock::now ());
+
+        for (const string& p: paths)
+          entry_tm (p);
+
+        timestamp end_time (system_clock::now ());
+
         nanoseconds d (end_time - start_time);
 
-        cerr << "entries: " << count << endl
+        cerr << "entries: " << paths.size () << endl
              << "full time: " << d << endl
-             << "time per entry: " << d / count << endl;
+             << "time per entry: " << d / paths.size () << endl;
 
         if (print_result)
-          cout << d.count () / count << endl;
+          cout << d.count () / paths.size () << endl;
 
         break;
       }
