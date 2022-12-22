@@ -496,11 +496,12 @@ operator<< (std::ostream& os, const timestamp& ts)
   return to_stream (os, ts, "%Y-%m-%d %H:%M:%S%[.N]", true, true);
 }
 
+template<class R, class P>
 static ostream&
-to_stream (ostream& os, const duration& d, bool ns)
+to_stream (ostream& os, const std::chrono::duration<R, P>& d, bool ns)
 {
   timestamp ts; // Epoch.
-  ts += d;
+  ts += duration_cast<duration> (d);
 
   time_t t (system_clock::to_time_t (ts));
 
@@ -595,8 +596,9 @@ to_stream (ostream& os, const duration& d, bool ns)
   return os;
 }
 
+template<class R, class P>
 static inline ostream&
-operator<< (ostream& os, const duration& d)
+operator<< (ostream& os, const std::chrono::duration<R, P>& d)
 {
   return to_stream (os, d, true);
 }
@@ -846,15 +848,15 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration d (end_time - start_time);
-        duration de (d / count);
+        duration     d (end_time - start_time);
+        nanoseconds de (duration_cast<nanoseconds> (d) / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
         if (print_result)
-          cout << duration_cast<nanoseconds> (de).count () << endl;
+          cout << de.count () << endl;
 
         break;
       }
@@ -1099,15 +1101,15 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration d (end_time - start_time);
-        duration de (d / count);
+        duration     d (end_time - start_time);
+        nanoseconds de (duration_cast<nanoseconds> (d) / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
         if (print_result)
-          cout << duration_cast<nanoseconds> (de).count () << endl;
+          cout << de.count () << endl;
 
         break;
       }
@@ -1246,15 +1248,15 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration d (end_time - start_time);
-        duration de (d / count);
+        duration     d (end_time - start_time);
+        nanoseconds de (duration_cast<nanoseconds> (d) / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
         if (print_result)
-          cout << duration_cast<nanoseconds> (de).count () << endl;
+          cout << de.count () << endl;
 
         break;
       }
@@ -1356,15 +1358,15 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration d (end_time - start_time);
-        duration de (d / count);
+        duration    d  (end_time - start_time);
+        nanoseconds de (duration_cast<nanoseconds> (d) / count);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
              << "time per entry: " << de << endl;
 
         if (print_result)
-          cout << duration_cast<nanoseconds> (de).count () << endl;
+          cout << de.count () << endl;
 
         break;
       }
