@@ -156,8 +156,11 @@ dir = boost_1_81_0
 
   $* avg $fffe_gfae_time $n | set fffe_gfae_time
 
+  t = $fffe_time
+  t += $gfae_time
+
   r = "
-Time per entry \(nsec\):
+Time per entry \(nanoseconds\):
   GetFileAttributesA:                      $gfa_time
   GetFileAttributesExA:                    $gfae_time
   GetFileInformationByHandle:              $gfibh_time
@@ -166,7 +169,7 @@ Time per entry \(nsec\):
   FindFirstFileA:                          $fff_time
   FindFirstFileExA:                        $fffe_time
 
-  FindFirstFileExA + GetFileAttributesExA: $fffe_gfae_time
+  FindFirstFileExA + GetFileAttributesExA: $fffe_gfae_time \(vs $t = $fffe_time + $gfae_time\)
 "
   $diag "$r"
 else
@@ -233,13 +236,16 @@ else
 
   $* avg $od_s_time $n | set od_s_time
 
+  t = $od_time
+  t += $s_time
+
   r = "
-Time per entry \(nsec\):
+Time per entry \(nanoseconds\):
   stat:    $s_time
 
   opendir: $od_time
 
-  opendir + stat: $od_s_time
+  opendir + stat: $od_s_time \(vs $t = $od_time + $s_time\)
 "
   $diag "$r"
 end

@@ -609,6 +609,65 @@ struct entry_time
   timestamp access;
 };
 
+// Usages:
+//
+//  Windows:
+//    argv[0] stat (-a|-e|-h) [-r] <file>
+//    argv[0] iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>
+//
+//  POSIX:
+//    argv[0] stat -s [-r] <file>
+//    argv[0] iter -o [-s] [-P <level>] [-r] <dir>
+//
+//  Common:
+//    argv[0] avg <sum> <count>
+//
+// In the first form reads the specified file containing filesystem entry
+// paths, one per line. Stat each path, retrieving the entry modification and
+// access times, using the specified stat method, and print the retrieval
+// statistics to stderr.
+//
+// In the second form iterate through the sub-entries of the specified
+// directory, recursively. Optionally, stat each path. Print the traversal
+// statistics to stderr.
+//
+// In the third form calculate the average (<sum> / <count>) and print the
+// result to stdout.
+//
+// -a
+//    Use GetFileAttributesA() to stat the filesystem entries (note:
+//    modification and access times are not retrieved).
+//
+// -e
+//    Use GetFileAttributesExA() to stat the filesystem entries.
+//
+// -h
+//    Use CreateFile() and GetFileInformationByHandle() to stat the filesystem
+//    entries.
+//
+// -s
+//    Use stat() to stat the filesystem entries.
+//
+// -p
+//    Use _findfirst() and _findnext() to traverse the directory.
+//
+// -n
+//    Use FindFirstFileA() and FindNextFileA() to traverse the directory.
+//
+// -N
+//    Use FindFirstFileExA() and FindNextFileA() to traverse the directory.
+//
+// -o
+//    Use opendir() and readdir() to traverse the directory.
+//
+// -r
+//    Print the average time in nanoseconds spent on the processing of a
+//    filesystem entry to stdout.
+//
+// -P <level>
+//    If level is not 0, then print the entry paths one per line, optionally
+//    together with their modification/access time (level > 1) to stdout.
+//
 int
 main (int argc, char* argv[])
 {
@@ -617,7 +676,8 @@ main (int argc, char* argv[])
     cerr << "Usage:" << endl
 #ifdef _WIN32
          << "  " << argv[0] << " stat (-a|-e|-h) [-r] <file>" << endl
-         << "  " << argv[0] << " iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>" << endl
+         << "  " << argv[0] << " iter (-p|-n|-N) [-a|-e|-h] [-P <level>] [-r] <dir>"
+         << endl
 #else
          << "  " << argv[0] << " stat -s [-r] <file>" << endl
          << "  " << argv[0] << " iter -o [-s] [-P <level>] [-r] <dir>" << endl
