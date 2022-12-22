@@ -291,6 +291,8 @@ namespace details
     return os;
   }
 }
+
+using namespace details;
 #endif
 
 namespace details
