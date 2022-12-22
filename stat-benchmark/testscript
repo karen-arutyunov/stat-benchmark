@@ -194,9 +194,52 @@ else
 
   $* avg $s_time $n | set s_time
 
+  # Iterating.
+  #
+
+  # opendir
+  #
+  $diag ""
+  $diag "Iterate using opendir"
+  $* iter -o $dir 2>! # Heat-up.
+
+  i = [uint64] 0
+  n = [uint64] 30
+  od_time = [uint64] 0
+
+  while ($i != $n)
+    $* iter -o -r $dir 2>| | set t [uint64]
+    od_time += $t
+    i += 1
+  end
+
+  $* avg $od_time $n | set od_time
+
+  # stat + opendir
+  #
+  $diag ""
+  $diag "Iterate using opendir + stat"
+  $* iter -o -s $dir 2>! # Heat-up.
+
+  i = [uint64] 0
+  n = [uint64] 30
+  od_s_time = [uint64] 0
+
+  while ($i != $n)
+    $* iter -o -s -r $dir 2>| | set t [uint64]
+    od_s_time += $t
+    i += 1
+  end
+
+  $* avg $od_s_time $n | set od_s_time
+
   r = "
 Time per entry \(nsec\):
-  stat: $s_time
+  stat:    $s_time
+
+  opendir: $od_time
+
+  opendir + stat: $od_s_time
 "
   $diag "$r"
 end

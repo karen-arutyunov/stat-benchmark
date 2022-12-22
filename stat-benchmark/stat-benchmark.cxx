@@ -21,6 +21,8 @@
 #endif
 
 #else
+#  include <dirent.h>    // struct dirent, *dir()
+#  include <sys/time.h>  // utimes()
 #  include <sys/types.h> // stat
 #  include <sys/stat.h>  // stat()
 #endif
@@ -1239,6 +1241,116 @@ main (int argc, char* argv[])
         if (count == 0)
         {
           cerr << "error: no entries in file " << p << endl;
+          throw failed ();
+        }
+
+        duration d (end_time - start_time);
+        duration de (d / count);
+
+        cerr << "entries: " << count << endl
+             << "full time: " << d << endl
+             << "time per entry: " << de << endl;
+
+        if (print_result)
+          cout << duration_cast<nanoseconds> (de).count () << endl;
+
+        break;
+      }
+    case cmd::iter:
+      {
+        if (i != argc - 1 || it == cmd_iter::none)
+          usage ();
+
+        string p (argv[i]);
+
+        size_t count (0);
+        timestamp start_time (system_clock::now ());
+
+        switch (it)
+        {
+        case cmd_iter::opendir:
+          {
+            auto iterate = [&count, st, &entry_tm, print]
+                           (const string& d, const auto& iterate) -> void
+            {
+              struct dir_deleter
+              {
+                void operator() (DIR* p) const {if (p != nullptr) closedir (p);}
+              };
+
+              unique_ptr<DIR, dir_deleter> h (opendir (d.c_str ()));
+
+              if (h == nullptr)
+              {
+                cerr << "error: opendir() failed for " << d << ": "
+                     << last_errno_msg () << endl;
+                throw failed ();
+              }
+
+              for (;;)
+              {
+                errno = 0;
+                if (struct dirent* de = readdir (h.get ()))
+                {
+                  string p (de->d_name);
+                  if (p == "." || p == "..")
+                    continue;
+
+                  ++count;
+
+                  p = d + '/' + p;
+
+                  bool dir (de->d_type == DT_DIR);
+
+                  entry_time et;
+                  if (st != cmd_stat::none)
+                    et = entry_tm (p);
+
+                  if (print != 0)
+                  {
+                    cout << p;
+
+                    if (print > 1)
+                    {
+                      if (st != cmd_stat::none)
+                        cout << " smod " << et.modification << " sacc "
+                             << et.access;
+                    }
+
+                    cout << endl;
+                  }
+
+                  if (dir)
+                    iterate (p, iterate);
+                }
+                else if (errno == 0)
+                {
+                  // End of stream.
+                  //
+                  h.reset ();
+                  break;
+                }
+                else
+                {
+                  cerr << "error: readdir() failed for " << d << ": "
+                       << last_errno_msg () << endl;
+                  throw failed ();
+                }
+              }
+            };
+
+            iterate (p, iterate);
+
+            break;
+          }
+        case cmd_iter::none: break;
+        }
+
+        timestamp end_time (system_clock::now ());
+
+        if (count == 0)
+        {
+          cerr << "error: no entries in " << p << endl;
           throw failed ();
         }
 
