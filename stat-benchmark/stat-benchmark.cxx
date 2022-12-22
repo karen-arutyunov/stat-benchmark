@@ -848,15 +848,14 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration     d (end_time - start_time);
-        nanoseconds de (duration_cast<nanoseconds> (d) / count);
+        nanoseconds d (end_time - start_time);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
-             << "time per entry: " << de << endl;
+             << "time per entry: " << d / count << endl;
 
         if (print_result)
-          cout << de.count () << endl;
+          cout << d.count () / count << endl;
 
         break;
       }
@@ -1101,15 +1100,14 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration     d (end_time - start_time);
-        nanoseconds de (duration_cast<nanoseconds> (d) / count);
+        nanoseconds d (end_time - start_time);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
-             << "time per entry: " << de << endl;
+             << "time per entry: " << d / count << endl;
 
         if (print_result)
-          cout << de.count () << endl;
+          cout << d.count () / count << endl;
 
         break;
       }
@@ -1248,15 +1246,14 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration     d (end_time - start_time);
-        nanoseconds de (duration_cast<nanoseconds> (d) / count);
+        nanoseconds d (end_time - start_time);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
-             << "time per entry: " << de << endl;
+             << "time per entry: " << d / count << endl;
 
         if (print_result)
-          cout << de.count () << endl;
+          cout << d.count () / count << endl;
 
         break;
       }
@@ -1358,15 +1355,14 @@ main (int argc, char* argv[])
           throw failed ();
         }
 
-        duration    d  (end_time - start_time);
-        nanoseconds de (duration_cast<nanoseconds> (d) / count);
+        nanoseconds d (end_time - start_time);
 
         cerr << "entries: " << count << endl
              << "full time: " << d << endl
-             << "time per entry: " << de << endl;
+             << "time per entry: " << d / count << endl;
 
         if (print_result)
-          cout << de.count () << endl;
+          cout << d.count () / count << endl;
 
         break;
       }
