@@ -8,6 +8,7 @@ url: https://example.org/stat-benchmark
 email: karen@codesynthesis.com
 #build-error-email: karen@codesynthesis.com
 builds: all
+builds: -wasm
 depends: * build2 >= 0.15.0
 depends: * bpkg >= 0.15.0
 #depends: libhello ^1.0.0
