@@ -18,6 +18,10 @@ dir = boost_1_81_0
 +$diag "Extract files from archive"
 +$tar_extract $src_base/boost_1_81_0.tar.xz &$dir/***
 
+# Create an empty sub-directory for the testing purposes.
+#
++mkdir $dir/empty-dir
+
 # Benchmarking on Windows.
 #
 +if ($windows)
