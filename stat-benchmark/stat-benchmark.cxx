@@ -997,8 +997,9 @@ main (int argc, char* argv[])
                   {
                     _findclose (h);
                     h = -1;
-                    break;
                   }
+
+                  break;
                 }
                 else
                 {
@@ -1138,8 +1139,9 @@ main (int argc, char* argv[])
                   {
                     FindClose (h);
                     h = INVALID_HANDLE_VALUE;
-                    break;
                   }
+
+                  break;
                 }
                 else
                 {
