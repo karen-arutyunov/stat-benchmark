@@ -670,15 +670,6 @@ struct entry_time
 //    If level is not 0, then print the entry paths one per line, optionally
 //    together with their modification/access time (level > 1) to stdout.
 //
-// @@ Add option -M <file> for Windows. Only considered for
-//    `iter (-n|-N) [-a|-e|-h]`. Before benchmarking go via files in <file>
-//    and add 1 byte to each file. This will test if the modification time is
-//    synced properly and matches the one obtained with stat function
-//
-//    The other approach is to create files in testscript and modify them and
-//    then test with `iter (-n|-N) [-a|-e|-h]`. This is probably the
-//    preferable approach.
-//
 int
 main (int argc, char* argv[])
 {

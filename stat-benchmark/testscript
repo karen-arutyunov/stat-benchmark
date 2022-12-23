@@ -22,13 +22,32 @@ dir = boost_1_81_0
 #
 +mkdir $dir/empty-dir
 
-# Benchmarking on Windows.
+# Benchmark on Windows.
 #
 +if ($windows)
+
+  # Prepare files for modification time sync test.
+  #
+  $diag ""
+  $diag "Prepare files for modification time sync test"
+
+  mod_dir = [dir_path] $dir/mod-dir
+  mkdir $mod_dir
+
+  i = [uint64] 0
+  n = [uint64] 300
+
+  while ($i != $n)
+    echo "$i" >= "$mod_dir/$i"
+    i += 1
+  end
+
+  # Prepare files list.
+  #
   $diag "Build files list"
   $* iter -n -P 1 $dir >=files 2>|
 
-  # Stating.
+  # Stat.
   #
 
   # GetFileAttributesA
@@ -85,7 +104,7 @@ dir = boost_1_81_0
 
   $* avg $gfibh_time $n | set gfibh_time
 
-  # Iterating.
+  # Iterate.
   #
 
   # _findfirst
@@ -175,12 +194,27 @@ Time per entry \(nanoseconds\):
 
   FindFirstFileExA + GetFileAttributesExA: $fffe_gfae_time \(vs $t = $fffe_time + $gfae_time\)
 "
+  # Modification time sync.
+  #
+  $diag ""
+  $diag "Testing modification time sync"
+
+  i = [uint64] 0
+  n = [uint64] 300
+
+  while ($i != $n)
+    echo "$i" >+ "$mod_dir/$i"
+    i += 1
+  end
+
+  $* iter -N -e $mod_dir 2>|
+
   $diag "$r"
 else
   $diag "Build files list"
   $* iter -o -P 1 $dir >=files 2>|
 
-  # Stating.
+  # Stat.
   #
 
   # stat
@@ -201,7 +235,7 @@ else
 
   $* avg $s_time $n | set s_time
 
-  # Iterating.
+  # Iterate.
   #
 
   # opendir
